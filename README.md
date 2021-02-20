@@ -76,6 +76,20 @@ fastify.view('/templates/index.ejs', { text: 'text' }, (err, html) => {
 })
 ```
 
+Like having 2 different declarations with different propertynames calling different partials:
+```js
+fastify.register(require('../index'), {
+  engine: { ejs: ejs },
+  layout: './templates/layout-mobile.ejs'
+  propertyName: 'mobile'
+})
+fastify.register(require('../index'), {
+  engine: { ejs: ejs },
+  layout: './templates/layout-desktop.ejs'
+  propertyName: 'desktop'
+})
+```
+
 If you want to set a fixed templates folder, or pass some options to the template engines:
 ```js
 fastify.register(require('point-of-view'), {
@@ -285,6 +299,20 @@ fastify.addHook('preHandler', function (request, reply, done) {
 })
 ```
 Properties from `reply.locals` will override those from `defaultContext`, but not from `data` parameter provided to `reply.view(template, data)` function.
+
+To require `point-of-view` as a dependency to a [fastify-plugin](https://github.com/fastify/fastify-plugin), add the name `point-of-view` to the dependencies array in the [plugin's opts](https://github.com/fastify/fastify-plugin#dependencies).
+
+```js
+fastify.register(myViewRendererPlugin,   {
+  dependencies: ['point-of-view']
+})
+```
+
+To forcefully clear cache when in production mode, call the `view.clearCache()` function.
+
+```js
+fastify.view.clearCache()
+```
 
 <a name="note"></a>
 ## Note

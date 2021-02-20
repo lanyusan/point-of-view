@@ -37,6 +37,7 @@ function fastifyView(fastify, opts, next) {
   }
 
   const charset = opts.charset || "utf-8";
+  const propertyName = opts.propertyName || "view";
   const engine = opts.engine[type];
   const options = opts.options || {};
   const templatesDir = opts.root || resolve(opts.templates || "./");
@@ -52,24 +53,33 @@ function fastifyView(fastify, opts, next) {
 
   if (
     layoutFileName &&
+    type !== "dot" &&
     type !== "handlebars" &&
     type !== "ejs" &&
     type !== "eta"
   ) {
     next(
-      new Error('Only Handlebars, EJS, and Eta support the "layout" option')
+      new Error(
+        'Only Dot, Handlebars, EJS, and Eta support the "layout" option'
+      )
     );
     return;
   }
 
-  if (layoutFileName && !hasAccessToLayoutFile(layoutFileName)) {
+  if (
+    layoutFileName &&
+    !hasAccessToLayoutFile(layoutFileName + (type === "dot" ? ".dot" : ""))
+  ) {
     next(new Error(`unable to access template "${layoutFileName}"`));
     return;
   }
 
   const dotRender =
     type === "dot"
-      ? viewDot.call(fastify, preProcessDot(templatesDir, options))
+      ? viewDot.call(
+          fastify,
+          preProcessDot.call(fastify, templatesDir, options)
+        )
       : null;
 
   const renders = {
@@ -81,14 +91,14 @@ function fastifyView(fastify, opts, next) {
     "art-template": viewArtTemplate,
     twig: viewTwig,
     liquid: viewLiquid,
-    dot: dotRender,
+    dot: withLayout(dotRender),
     eta: withLayout(viewEta),
     _default: view,
   };
 
   const renderer = renders[type] ? renders[type] : renders._default;
 
-  fastify.decorate("view", function () {
+  function viewDecorator() {
     const args = Array.from(arguments);
 
     let done;
@@ -120,7 +130,7 @@ function fastifyView(fastify, opts, next) {
     }
 
     return promise;
-  });
+  }
 
   fastify.decorateReply("view", function () {
     if (arguments.length === 0) renderer.apply(this, arguments);
@@ -131,11 +141,22 @@ function fastifyView(fastify, opts, next) {
       const _engineName = args.shift();
       const engineName = _engineName.substring(1).slice(0, -1);
       const renderer = renders[engineName];
-      if (!renderer) throw Error("Not supported engine");
+      if (!renderer) throw Error("Engine not supported");
       renderer.apply(this, args);
     } else renderer.apply(this, arguments);
     return this;
   });
+
+  viewDecorator.clearCache = function () {
+    lru.clear();
+  };
+
+  fastify.decorate(propertyName, viewDecorator);
+
+  // fastify.decorateReply(propertyName, function () {
+  //   renderer.apply(this, arguments)
+  //   return this
+  // })
 
   function getPage(page, extension) {
     if (viewExt) {
@@ -226,6 +247,14 @@ function fastifyView(fastify, opts, next) {
 
       let compiledPage;
       try {
+        if (type === "ejs" && viewExt && !options.includer) {
+          options.includer = (originalPath, parsedPath) => {
+            return {
+              filename:
+                parsedPath || join(templatesDir, originalPath + "." + viewExt),
+            };
+          };
+        }
         options.filename = join(templatesDir, page);
         compiledPage = engine.compile(html, options);
       } catch (error) {
@@ -629,7 +658,7 @@ function fastifyView(fastify, opts, next) {
     lru.define = lru.set;
     const engine = opts.engine["eta"];
     engine.configure({
-      templates: lru,
+      templates: options.templates ? options.templates : lru,
     });
 
     const config = Object.assign({ views: templatesDir }, options);
@@ -674,6 +703,8 @@ function fastifyView(fastify, opts, next) {
       return function (page, data, opts) {
         const that = this;
 
+        data = Object.assign({}, defaultCtx, this.locals, data);
+
         render.call(
           {
             getHeader: () => {},
@@ -709,4 +740,7 @@ function fastifyView(fastify, opts, next) {
   }
 }
 
-module.exports = fp(fastifyView, { fastify: ">=3.x" });
+module.exports = fp(fastifyView, {
+  fastify: "3.x",
+  name: "point-of-view",
+});
